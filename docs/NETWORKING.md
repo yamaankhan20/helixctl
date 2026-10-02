@@ -485,7 +485,7 @@ IPAM.ReleaseIP()
 # 18. Container Network Creation Flow
 
 ```text
-Create container network namespace
+Receive existing container network namespace / PID from Runtime
     ↓
 Allocate container IP
     ↓

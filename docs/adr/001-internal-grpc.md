@@ -22,6 +22,13 @@ ApplyRoutes
 
 Use **gRPC with Protobuf** for the internal Control Plane <-> Node Agent boundary.
 
+We will use two explicit logical gRPC service contracts for v1:
+
+1. `ControlPlaneService` (hosted by `helixd`, called by `helix-agent`)
+2. `AgentService` (hosted by `helix-agent`, called by `helixd`)
+
+This approach acknowledges the distinct directionality of node-to-cluster status reporting versus cluster-to-node command execution.
+
 ## Why
 
 - RPC semantics match the operations.

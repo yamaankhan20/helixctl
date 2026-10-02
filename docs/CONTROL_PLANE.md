@@ -258,9 +258,24 @@ Registration should validate:
 
 - unique node identity
 - valid management address
+- **valid Agent RPC advertised endpoint**
 - valid container CIDR
 - no conflicting node CIDR
 - supported Agent version where required
+
+The node registry record conceptually includes:
+
+```text
+Node ID
+Hostname
+Management IP
+Agent RPC endpoint
+Container CIDR
+CPU Capacity
+Memory Capacity
+Agent Version
+Network Readiness
+```
 
 The Control Plane then marks the node as registered but should only schedule onto it after readiness requirements are satisfied.
 
@@ -336,14 +351,27 @@ This ambiguity matters during rescheduling.
 
 The Scheduler chooses a node for a workload.
 
-It should not:
+It operates on domain data and does not modify Linux state or call runtime/network components.
 
-- modify Linux state
-- call cgroups
-- call netlink
-- create processes
+### 14.1. Resource Reservations
 
-It operates on domain data.
+Heartbeat-reported available capacity alone is insufficient for concurrent scheduling. The Control Plane must ensure two concurrent placements do not consume the same effective capacity.
+
+We use a simple v1 reservation model:
+`Effective Schedulable Capacity = Node Capacity - Reserved Resources`.
+
+Placement transaction:
+1. Validate request.
+2. Atomically lock scheduler state.
+3. Filter nodes.
+4. Score candidates.
+5. Select best node.
+6. Reserve requested CPU/memory on the selected node.
+7. Store assignment.
+8. Release lock.
+9. Dispatch `RunContainer`.
+
+Reservations are released/updated if the workload is removed, execution permanently fails, or the assignment is cancelled.
 
 ---
 

@@ -384,26 +384,36 @@ This makes multi-component debugging much easier.
 
 ---
 
-# 18. Internal gRPC Service
+# 18. Internal gRPC Services
 
-Conceptual Protobuf service:
+Helix uses two logical gRPC service contracts to manage internal coordination, with distinct server/client roles.
 
 ```proto
-service AgentService {
+service ControlPlaneService {
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ReportStatus(ReportStatusRequest) returns (ReportStatusResponse);
+}
 
+service AgentService {
   rpc RunContainer(RunContainerRequest) returns (RunContainerResponse);
   rpc StopContainer(StopContainerRequest) returns (StopContainerResponse);
   rpc RemoveContainer(RemoveContainerRequest) returns (RemoveContainerResponse);
   rpc InspectContainer(InspectContainerRequest) returns (InspectContainerResponse);
   rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
-
   rpc ApplyRoutes(ApplyRoutesRequest) returns (ApplyRoutesResponse);
 }
 ```
 
-The actual `.proto` file remains the source of truth once implementation begins.
+### 18.1. ControlPlaneService
+* **Server**: `helixd`
+* **Client**: `helix-agent`
+* **Responsibilities**: Node registration, heartbeats, and status reporting initiated by the worker agent.
+
+### 18.2. AgentService
+* **Server**: `helix-agent`
+* **Client**: `helixd`
+* **Responsibilities**: Lifecycle commands (Run, Stop, Inspect, List) and route updates initiated by the Control Plane.
 
 ---
 

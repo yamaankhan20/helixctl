@@ -248,12 +248,15 @@ Implement:
 resource filters
 round-robin baseline
 least-load scoring
+atomic placement reservation
+reservation rollback/release
 ```
 
 Success:
 
 ```text
-container request is assigned to a healthy node with sufficient capacity
+1. container request is assigned to a healthy node with sufficient capacity
+2. two concurrent placement requests cannot both consume the same remaining node capacity
 ```
 
 ---
