@@ -10,32 +10,29 @@ The project should grow vertically.
 
 Each milestone should produce something observable before another major subsystem is stacked on top.
 
-```mermaid
-flowchart LR
-    F[Foundation]
-    P[Process Runner]
-    NS[Namespaces]
-    CG[cgroups v2]
-    RF[RootFS / pivot_root]
-    LN[Local Networking]
-    AG[Node Agent]
-    CP[Control Plane]
-    SC[Scheduler]
-    E2E[End-to-End Run]
-    MR[Multi-Node Routing]
-    HM[Health]
-    RC[Reconciliation]
-    RS[Rescheduling]
-    SD[Service Discovery]
-    DNS[Internal DNS]
-    FT[Failure Testing]
-    OBS[Observability / Polish]
-
-    F --> P --> NS --> CG --> RF --> LN --> AG --> CP --> SC --> E2E
-    E2E --> MR --> HM --> RC --> RS --> SD --> DNS --> FT --> OBS
-```
-
 The sequence is:
+
+```text
+repository foundation + contracts
+    ↓
+Linux execution
+    ↓
+container isolation
+    ↓
+local networking
+    ↓
+Node Agent
+    ↓
+Control Plane
+    ↓
+multi-node networking
+    ↓
+reconciliation
+    ↓
+service discovery
+    ↓
+failure testing
+```
 
 ---
 
@@ -49,7 +46,11 @@ Build:
 - `cmd/helix-agent`
 - `internal/domain`
 - `internal/config`
-- structured logging
+- `internal/observability`
+- package skeletons under `internal/controlplane`, `internal/agent`, `internal/runtime`, `internal/network`, and `internal/discovery`
+- `internal/agentclient`
+- `api/`, `gen/`, `tests/`, and `scripts/` foundations
+- structured logging foundation
 - Makefile
 - docs structure
 
@@ -62,29 +63,40 @@ go test ./... passes
 
 ---
 
-# 3. Milestone 0A — Architecture Contracts / Boundaries
+# 2A. Milestone 0A — Contracts and Boundaries
 
-Finalize core design contracts to prevent major rewrites:
+Freeze the minimum v1 contracts before deep Runtime/Agent implementation:
 
-- Workload / Container Instance / Node / Service / Endpoint identity
-- Runtime vs Network Manager boundary
-- Agent ↔ Control Plane transport topology
-- Node registration model
-- Container lifecycle states
-- Node health states
-- Route generation semantics
-- Idempotent request identity
-- v1 health semantics
+- Workload vs Container Instance identity
+- Node, Service, Endpoint, Route, and Resource domain types
+- Runtime owns namespace/process isolation
+- Network Manager configures connectivity in the Runtime-created network namespace
+- `helixd` hosts Agent-originated registration/heartbeat/status RPCs
+- each `helix-agent` hosts Control-Plane-originated lifecycle/route RPCs
+- Agent registration advertises its RPC management address
+- container/workload lifecycle states
+- node health states
+- route generation semantics
+- request/container identity for idempotent lifecycle calls
+- minimum v1 workload health = process is running; HTTP/TCP/exec probes remain extensible
 
 Success:
 
 ```text
-Core gRPC contracts and domain boundaries finalized.
+domain boundaries and RPC direction are documented consistently
+README, ARCHITECTURE, API, CONTROL_PLANE, RUNTIME, and NETWORKING agree
+```
+
+Testing rule:
+
+```text
+every milestone adds tests for the behavior it introduces
+Milestone 19 expands system-level hardening; it does not postpone testing until the end
 ```
 
 ---
 
-# 4. Milestone 1 — Local Process Runner
+# 3. Milestone 1 — Local Process Runner
 
 Build a minimal local Runtime that can execute a process through Go.
 
@@ -205,8 +217,9 @@ two containers on one node communicate through helix0
 
 Build:
 
-- gRPC server
-- node registration client
+- Agent gRPC server for lifecycle/route commands
+- node registration client to the Control Plane gRPC service
+- advertised Agent RPC management address
 - heartbeat loop
 - local resource reporting
 - Runtime integration
@@ -226,6 +239,7 @@ remote caller can ask Agent to run/inspect/stop a container
 Build:
 
 - REST server
+- Control Plane gRPC service for registration/heartbeat/status
 - in-memory cluster state
 - Node Registry
 - AgentClient
@@ -248,15 +262,15 @@ Implement:
 resource filters
 round-robin baseline
 least-load scoring
-atomic placement reservation
+atomic CPU/memory placement reservations
 reservation rollback/release
 ```
 
 Success:
 
 ```text
-1. container request is assigned to a healthy node with sufficient capacity
-2. two concurrent placement requests cannot both consume the same remaining node capacity
+container request is assigned to a healthy node with sufficient capacity
+concurrent requests cannot consume the same reserved capacity
 ```
 
 ---
@@ -366,6 +380,37 @@ a RUNNING desired workload is recreated on another healthy node
 
 ---
 
+# 15A. Milestone 13A — Workload Health and Endpoint Readiness
+
+Define v1 workload health separately from node health.
+
+Initial rule:
+
+```text
+container instance process is alive
+    ↓
+workload health is satisfied
+    ↓
+endpoint may become HEALTHY
+```
+
+Keep the model extensible for later:
+
+```text
+HTTP probe
+TCP probe
+exec probe
+```
+
+Success:
+
+```text
+a healthy node does not automatically make every service endpoint healthy
+service endpoint readiness follows explicit workload health
+```
+
+---
+
 # 16. Milestone 14 — Service Registry
 
 Add:
@@ -457,6 +502,8 @@ one workload can be traced from API request to Agent/Runtime outcome
 
 # 21. Milestone 19 — Test Hardening
 
+Testing has been incremental since Milestone 0. This milestone adds broader concurrency, failure, and multi-node coverage after the major vertical slices exist.
+
 Required:
 
 ```text
@@ -473,6 +520,10 @@ Add:
 - node failure
 - DNS endpoint filtering
 - cleanup leak checks
+- concurrent scheduler reservation/overcommit tests
+- Control Plane service + Agent service gRPC direction tests
+- Agent registration advertises a reachable RPC address
+- workload-health vs node-health endpoint-readiness tests
 
 ---
 

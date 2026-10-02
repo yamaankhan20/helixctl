@@ -63,6 +63,10 @@ Do not call Linux runtime syscalls directly.
 
 Only manipulate Helix-owned network resources.
 
+### gRPC transport boundaries
+
+Keep generated Protobuf messages at the transport edge. gRPC handlers must translate between Protobuf messages and domain/application operations instead of spreading generated transport types through Control Plane, Runtime, networking, or domain packages.
+
 ---
 
 ## Generated Code

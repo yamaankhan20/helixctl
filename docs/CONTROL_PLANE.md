@@ -16,10 +16,11 @@ The boundary is:
 
 ```text
 Helix Control Plane
-        |
-        | gRPC
+        |  commands / routes
         v
 Helix Node Agent
+        |  registration / heartbeat / status
+        +-------------------------------> Control Plane
         |
         +--> Helix Runtime
         +--> Helix Network Manager
@@ -97,6 +98,8 @@ create Service Discovery
 create Health Manager
     ↓
 create Reconciler
+    ↓
+start ControlPlaneService gRPC API
     ↓
 start REST API
     ↓
@@ -227,6 +230,7 @@ A Node record can contain:
 Node ID
 Hostname
 Management IP
+Agent RPC Address
 Container CIDR
 Total CPU
 Available CPU
@@ -258,26 +262,12 @@ Registration should validate:
 
 - unique node identity
 - valid management address
-- **valid Agent RPC advertised endpoint**
+- valid Agent RPC address on the trusted management network
 - valid container CIDR
 - no conflicting node CIDR
 - supported Agent version where required
 
-The node registry record conceptually includes:
-
-```text
-Node ID
-Hostname
-Management IP
-Agent RPC endpoint
-Container CIDR
-CPU Capacity
-Memory Capacity
-Agent Version
-Network Readiness
-```
-
-The Control Plane then marks the node as registered but should only schedule onto it after readiness requirements are satisfied.
+The Agent Client stores/uses the registered Agent RPC address to dial the Agent-hosted `AgentService`. The Control Plane then marks the node as registered but should only schedule onto it after readiness requirements are satisfied.
 
 ---
 
@@ -305,19 +295,22 @@ The Control Plane records the latest observation.
 
 A useful node-health model:
 
-```mermaid
-stateDiagram-v2
-    [*] --> REGISTERING
-    REGISTERING --> HEALTHY: registration + ready
+```text
+REGISTERING
+HEALTHY
+SUSPECT
+UNREACHABLE
+NOT_READY
+```
 
-    HEALTHY --> SUSPECT: missed heartbeat
-    SUSPECT --> HEALTHY: heartbeat restored
-    SUSPECT --> UNREACHABLE: health timeout
+Example transition:
 
-    HEALTHY --> NOT_READY: network/runtime readiness lost
-    NOT_READY --> HEALTHY: readiness restored
-
-    UNREACHABLE --> HEALTHY: node reconnects / registers
+```text
+HEALTHY
+  ↓ missed heartbeats
+SUSPECT
+  ↓ timeout exceeded
+UNREACHABLE
 ```
 
 Network readiness can be tracked separately because a node can be alive while container networking is broken.
@@ -349,29 +342,37 @@ This ambiguity matters during rescheduling.
 
 # 14. Scheduler
 
-The Scheduler chooses a node for a workload.
+The Scheduler chooses a node for a workload. It operates on domain data and must not modify Linux state, call cgroups/netlink, or create processes.
 
-It operates on domain data and does not modify Linux state or call runtime/network components.
+## 14.1 Resource Reservations
 
-### 14.1. Resource Reservations
+Heartbeat-reported capacity alone is insufficient for concurrent scheduling. v1 uses Control Plane reservations so two placement requests cannot consume the same apparent free resources.
 
-Heartbeat-reported available capacity alone is insufficient for concurrent scheduling. The Control Plane must ensure two concurrent placements do not consume the same effective capacity.
+```text
+Effective Schedulable Capacity
+=
+Node Capacity - Reserved Resources
+```
 
-We use a simple v1 reservation model:
-`Effective Schedulable Capacity = Node Capacity - Reserved Resources`.
+Placement is conceptually atomic with respect to competing schedulers:
 
-Placement transaction:
-1. Validate request.
-2. Atomically lock scheduler state.
-3. Filter nodes.
-4. Score candidates.
-5. Select best node.
-6. Reserve requested CPU/memory on the selected node.
-7. Store assignment.
-8. Release lock.
-9. Dispatch `RunContainer`.
+```text
+validate request
+    ↓
+filter eligible nodes
+    ↓
+score candidates
+    ↓
+select node
+    ↓
+reserve requested CPU / memory
+    ↓
+commit assignment
+    ↓
+dispatch RunContainer
+```
 
-Reservations are released/updated if the workload is removed, execution permanently fails, or the assignment is cancelled.
+Reservations are released or adjusted when placement permanently fails, a workload is deleted/cancelled, an execution is intentionally stopped with no replacement desired, or reconciliation supersedes the assignment. Temporary Agent communication errors do not automatically discard ownership; reconciliation handles the uncertain state.
 
 ---
 
@@ -387,6 +388,10 @@ Eligible Nodes
 Score
     ↓
 Selected Node
+    ↓
+Reserve CPU / Memory
+    ↓
+Commit Assignment
 ```
 
 ---
@@ -453,6 +458,24 @@ LeastLoadScheduler
 ```
 
 Future work can add other strategies without changing API handlers or the Node Agent.
+
+---
+
+# 18A. Placement Reservations
+
+Scheduler decisions must account for concurrent create requests between heartbeats. The Control Plane should therefore reserve requested CPU and memory atomically when a placement is committed.
+
+```text
+observed node capacity
+    ↓
+subtract active reservations
+    ↓
+effective schedulable capacity
+    ↓
+filter + score + reserve
+```
+
+Reservations are released or reconciled when placement fails, a workload stops, or the assignment is replaced. Heartbeat values remain observations; they are not the synchronization mechanism for concurrent placement.
 
 ---
 
@@ -666,17 +689,21 @@ The Reconciler and Agent reports update endpoint state when workloads:
 
 A container should not immediately become a healthy service endpoint just because a process exists.
 
+The minimum v1 workload-health condition is **process health**: the container process is still running. This keeps the first version deterministic while allowing later HTTP, TCP, or exec probes.
+
 A useful path:
 
 ```text
-RUNNING
+container instance RUNNING
     ↓
-health condition satisfied
+process health satisfied
     ↓
 endpoint HEALTHY
     ↓
 eligible for DNS response
 ```
+
+Later health-check types can refine endpoint readiness without changing the Service/Endpoint model.
 
 ---
 
@@ -693,9 +720,9 @@ sequenceDiagram
 
     U->>API: POST /v1/containers
     API->>ST: Create Desired=RUNNING
-    API->>S: SelectNode()
-    S-->>API: Node B
-    API->>ST: assignment=Node B
+    API->>S: SelectAndReserve()
+    S-->>API: Node B + reservation
+    API->>ST: commit assignment=Node B
     API->>AC: RunContainer()
     AC->>A: gRPC RunContainer
     A-->>AC: status

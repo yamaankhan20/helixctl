@@ -116,9 +116,13 @@ flowchart TB
         end
     end
 
-    CP -->|gRPC| A1[Helix Node Agent A]
-    CP -->|gRPC| A2[Helix Node Agent B]
-    CP -->|gRPC| A3[Helix Node Agent C]
+    A1[Helix Node Agent A] -->|ControlPlaneService: register / status| CP
+    A2[Helix Node Agent B] -->|ControlPlaneService: register / status| CP
+    A3[Helix Node Agent C] -->|ControlPlaneService: register / status| CP
+
+    CP -->|AgentService: commands / routes| A1
+    CP -->|AgentService: commands / routes| A2
+    CP -->|AgentService: commands / routes| A3
 
     subgraph N1[Node A]
         A1 --> R1[Helix Runtime]
@@ -235,7 +239,7 @@ The **Helix Network Manager** is responsible for local container networking.
 
 It handles:
 
-- network namespaces,
+- configuring existing container network namespaces provided by the Runtime,
 - veth pairs,
 - Linux bridges,
 - container IP allocation,
@@ -246,12 +250,22 @@ It handles:
 
 ---
 
-# 6. Container Model
+# 6. Workload and Container Instance Model
 
-A container is modeled as an isolated Linux process rather than a virtual machine.
+Helixctl separates cluster intent from one concrete Linux execution.
 
 ```text
-Container
+Workload
+= desired logical execution
+
+Container Instance
+= one concrete Linux process execution of that workload on one node
+```
+
+A container instance is still an isolated Linux process rather than a virtual machine:
+
+```text
+Container Instance
 =
 Linux Process
 + PID Namespace
@@ -263,35 +277,37 @@ Linux Process
 + Virtual Network Interface
 ```
 
-A conceptual container record:
+Conceptual records:
 
 ```go
-type Container struct {
+type Workload struct {
+    ID           string
+    Name         string
+    RootFS       string
+    Command      []string
+    CPU          int64
+    MemoryBytes  int64
+    DesiredState string
+}
+
+type ContainerInstance struct {
     ID          string
-    Name        string
-    Image       string
-    Command     []string
-
-    CPU         int64
-    MemoryBytes int64
-
+    WorkloadID  string
     NodeID      string
     PID         int
     IPAddress   string
-
-    DesiredState string
-    ActualState  string
+    ActualState string
 
     CreatedAt time.Time
     UpdatedAt time.Time
 }
 ```
 
-The implementation can evolve, but the separation between identity, placement, process state, resource configuration, and network state should remain.
+A reschedule preserves the workload identity while creating a replacement container instance on another node. The exact field layout can evolve, but desired intent must not be conflated with one process PID, node assignment, or container IP.
 
 ---
 
-# 7. Container Lifecycle
+# 7. Workload Execution Lifecycle
 
 The container lifecycle is modeled explicitly.
 
@@ -316,7 +332,7 @@ stateDiagram-v2
 | `PENDING` | Workload exists but has not yet been assigned |
 | `SCHEDULED` | A node has been selected |
 | `CREATING` | Runtime is building container isolation/networking |
-| `RUNNING` | Container process is alive |
+| `RUNNING` | A concrete container instance process is alive |
 | `FAILED` | Creation or runtime execution failed |
 | `STOPPING` | Termination is in progress |
 | `STOPPED` | Container was intentionally stopped |
@@ -448,38 +464,37 @@ The CLI never directly invokes the runtime.
 
 ## Decision
 
-Control Plane ↔ Node Agent communication uses **gRPC**.
+Internal coordination uses **gRPC with two executable-owned service contracts**.
 
-Example RPCs:
+`helixd` hosts `ControlPlaneService`, called by `helix-agent` for:
 
 ```text
 RegisterNode
 Heartbeat
+ReportStatus
+```
+
+Each `helix-agent` hosts `AgentService`, called by `helixd` through `internal/agentclient` for:
+
+```text
 RunContainer
 StopContainer
 RemoveContainer
 InspectContainer
 ListContainers
-GetNodeStatus
 ApplyRoutes
 ```
 
-### Why gRPC
+The topology is therefore:
 
-The internal API is service-to-service communication between Go components.
+```text
+helix-agent --ControlPlaneService--> helixd
+helixd      --AgentService--------> helix-agent
+```
 
-gRPC was selected because:
+During registration, the Agent advertises the management-network address of its `AgentService`, allowing the Control Plane to dial the worker. Protobuf keeps these transport contracts explicit while domain types remain transport-independent.
 
-- Protobuf provides explicit contracts,
-- request/response types are strongly defined,
-- Go support is mature,
-- RPC semantics match node operations,
-- binary serialization is efficient,
-- streaming can be added later without redesigning the protocol.
-
-A later version can use streaming for heartbeats, node events, or status updates.
-
-The first implementation can remain mostly unary RPC-based.
+The first implementation can remain mostly unary RPC-based. A later version may stream heartbeat/status traffic without changing executable ownership.
 
 ---
 
@@ -720,6 +735,7 @@ Example node information:
 Node ID
 Hostname
 Management IP
+Agent RPC Address
 Total CPU
 Available CPU
 Total Memory
@@ -782,7 +798,7 @@ The recovery logic must be designed with this ambiguity in mind.
 
 # 16. Scheduler Architecture
 
-Scheduling is split into two operations:
+Scheduling is a placement transaction rather than only a read-only scoring operation.
 
 ```text
 Nodes
@@ -798,7 +814,23 @@ SCORE
   |
   v
 Selected Node
+  |
+  v
+RESERVE CPU / MEMORY
+  |
+  v
+COMMIT ASSIGNMENT
 ```
+
+Heartbeat observations alone cannot safely represent concurrent placement. v1 therefore uses:
+
+```text
+Effective Schedulable Capacity
+=
+Node Capacity - Control Plane Reserved Resources
+```
+
+Selection, reservation, and assignment commit are atomic with respect to competing placement requests. A permanent placement failure, workload deletion, or cancelled assignment releases the reservation; transient communication failures remain subject to reconciliation so ownership is not silently discarded.
 
 ---
 
@@ -877,6 +909,24 @@ Round-robin is still useful as:
 - a scheduler test implementation,
 - a fallback strategy.
 
+## 16.3 Capacity Reservations
+
+Heartbeat-reported availability is an observation, not a safe concurrency primitive. After a placement is accepted, the Control Plane should atomically reserve the workload's requested CPU and memory before another scheduling decision can consume the same capacity.
+
+Conceptually:
+
+```text
+reported/allocatable capacity
+    ↓
+subtract active Control Plane reservations
+    ↓
+effective schedulable capacity
+    ↓
+filter + score + reserve atomically
+```
+
+Reservations are released or reconciled when placement fails, a workload stops, or actual state proves that the assignment no longer owns those resources. This prevents concurrent create requests from independently selecting the same apparently-free capacity between heartbeats.
+
 ---
 
 # 17. Container Runtime Internals
@@ -904,7 +954,7 @@ Create cgroup
     ↓
 Apply CPU/memory limits
     ↓
-Configure container network
+Network Manager configures existing network namespace
     ↓
 pivot_root
     ↓
@@ -1658,9 +1708,18 @@ DNS high availability is not required before the first complete end-to-end syste
 
 ---
 
-# 31. Node, Container, and Service Model
+# 31. Workload, Node, Container Instance, and Service Model
 
-These three entities have different responsibilities.
+These entities have different responsibilities.
+
+## Workload
+
+A logical desired execution tracked by the Control Plane.
+
+A workload can be recreated as a different container instance when its assigned node or process fails.
+
+---
+
 
 ## Node
 
@@ -1674,13 +1733,13 @@ node-b
 node-c
 ```
 
-A node hosts containers.
+A node hosts container instances.
 
 ---
 
-## Container
+## Container Instance
 
-A concrete isolated Linux process instance.
+A concrete isolated Linux process execution of a workload.
 
 Example:
 
@@ -1688,7 +1747,7 @@ Example:
 auth-7f82
 ```
 
-A container:
+A container instance:
 
 - runs on one node,
 - has one runtime PID on that node,
@@ -1710,7 +1769,7 @@ payments
 orders
 ```
 
-A service is **not** a node and is **not** a container.
+A service is **not** a node, workload, or container instance.
 
 A service points to one or more healthy container endpoints.
 
@@ -1747,9 +1806,13 @@ orders
 The relationship is:
 
 ```text
+Workload
+  ↓ realized by
+Container Instance
+  ↓ runs on
 Node
-  ↓ hosts
-Container
+
+Container Instance
   ↓ may back
 Service
 ```
@@ -1789,15 +1852,15 @@ sequenceDiagram
 
     U->>C: POST /v1/containers
     C->>C: Store Desired=RUNNING in memory
-    C->>S: SelectNode(workload)
-    S-->>C: Node B
+    C->>S: SelectAndReserve(workload)
+    S-->>C: Node B + reservation
     C->>A: RunContainer() via gRPC
     A->>R: Create container
     R->>K: Create namespaces
     R->>K: Create cgroup + limits
     R->>K: Prepare/pivot rootfs
     A->>N: Configure networking
-    N->>K: netns + veth + bridge + IP
+    N->>K: configure veth + helix0 + IP + routes in existing netns
     R->>K: Start process
     K-->>R: PID
     R-->>A: RUNNING
@@ -2068,64 +2131,72 @@ Later security work can add:
 
 ```text
 helixctl/
-│
 ├── cmd/
-│   ├── controlplane/
-│   ├── agent/
-│   └── helixctl/
+│   ├── helixctl/
+│   │   └── main.go
+│   ├── helixd/
+│   │   └── main.go
+│   └── helix-agent/
+│       └── main.go
 │
 ├── api/
-│   ├── rest/
-│   └── grpc/
+│   ├── proto/
+│   │   └── helix/v1/
+│   └── openapi/
+│       └── helix.yaml
 │
-├── controlplane/
-│   ├── scheduler/
-│   ├── registry/
-│   ├── reconciler/
-│   ├── health/
-│   ├── routes/
-│   ├── services/
-│   └── state/
-│
-├── agent/
-│   ├── lifecycle/
-│   ├── reporter/
-│   └── routes/
-│
-├── runtime/
-│   ├── namespaces/
-│   ├── cgroups/
-│   ├── rootfs/
-│   ├── process/
-│   └── container/
-│
-├── network/
-│   ├── netns/
-│   ├── veth/
-│   ├── bridge/
-│   ├── ipam/
-│   └── routing/
-│
-│
-├── service/
-│   └── discovery/
-│       ├── registry/
-│       ├── endpoints/
-│       ├── health/
-│       └── dns/
+├── gen/
+│   └── proto/helix/v1/
 │
 ├── internal/
-│   ├── model/
+│   ├── domain/
+│   │   ├── workload.go
+│   │   ├── container.go
+│   │   ├── node.go
+│   │   ├── service.go
+│   │   ├── endpoint.go
+│   │   ├── route.go
+│   │   └── resources.go
+│   ├── controlplane/
+│   │   ├── server/
+│   │   ├── state/
+│   │   ├── registry/
+│   │   ├── scheduler/
+│   │   ├── health/
+│   │   ├── reconciler/
+│   │   └── routes/
+│   ├── agent/
+│   │   ├── server/
+│   │   ├── registration/
+│   │   ├── heartbeat/
+│   │   ├── lifecycle/
+│   │   └── reporter/
+│   ├── agentclient/
+│   ├── runtime/
+│   │   ├── container/
+│   │   ├── namespace/
+│   │   ├── cgroup/
+│   │   ├── rootfs/
+│   │   └── process/
+│   ├── network/
+│   │   ├── netns/
+│   │   ├── veth/
+│   │   ├── bridge/
+│   │   ├── ipam/
+│   │   └── routing/
+│   ├── discovery/
+│   │   ├── registry/
+│   │   ├── endpoints/
+│   │   ├── health/
+│   │   └── dns/
 │   ├── config/
-│   └── logging/
+│   └── observability/
 │
-├── proto/
-│   └── agent.proto
+├── tests/
+│   ├── integration/
+│   └── e2e/
 │
 ├── scripts/
-│   ├── setup-node.sh
-│   └── smoke-test.sh
-│
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── NETWORKING.md
@@ -2142,9 +2213,14 @@ helixctl/
 │       ├── 003-routed-networking.md
 │       └── 004-service-discovery.md
 │
+├── Makefile
 ├── go.mod
+├── go.sum
+├── CONTRIBUTING.md
 └── README.md
 ```
+
+`cmd/` contains dependency wiring only. Domain, orchestration, runtime, networking, and discovery logic live under `internal/` so executable packages do not become business-logic owners.
 
 ---
 
@@ -2162,6 +2238,7 @@ helixctl/
 | Resource control | cgroups v2 | Modern Linux resource management |
 | Scheduler | Filter + least-load | Resource-aware placement |
 | Scheduler design | Interface-based | Allows alternate placement strategies |
+| Capacity accounting | Control Plane reservations | Prevent concurrent placements from consuming the same heartbeat-reported capacity |
 | State model | Desired + actual | Enables reconciliation |
 | State store | In-memory | No database dependency; keeps the first version focused on orchestration and low-level runtime behavior |
 | Control Plane | Single instance initially | Avoid premature consensus complexity |

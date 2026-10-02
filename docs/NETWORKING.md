@@ -10,7 +10,7 @@ The main `ARCHITECTURE.md` explains the entire Helixctl system.
 
 This file focuses only on the networking side.
 
-I wanted the networking layer to be documented separately because it is not just one small runtime feature. It is a complete subsystem with its own responsibilities:
+The networking layer is documented separately because it is not just one small runtime feature. It is a complete subsystem with its own responsibilities:
 
 - container network namespaces
 - veth pairs
@@ -28,7 +28,7 @@ I wanted the networking layer to be documented separately because it is not just
 
 The goal is to keep the packet path visible and understandable.
 
-I am not using Docker networking, Kubernetes CNI, or an overlay network in the first version. I want Helixctl to build the important Linux networking pieces directly.
+The first version does not use Docker networking, Kubernetes CNI, or an overlay network. Helixctl builds the important Linux networking pieces directly.
 
 ---
 
@@ -95,7 +95,7 @@ For cross-node communication, the packet uses normal Linux L3 routing between no
 
 ```text
 Helix Network Manager
-├── Network Namespace Manager
+├── Network Namespace Configurator
 ├── Veth Manager
 ├── Bridge Manager
 ├── IPAM
@@ -107,6 +107,8 @@ Helix Control Plane
 ```
 
 Each component has a narrow responsibility.
+
+The Runtime creates the process Network Namespace as part of isolation. The Network Manager configures connectivity inside that existing namespace; it does not independently create the process namespace.
 
 ---
 
@@ -484,8 +486,10 @@ IPAM.ReleaseIP()
 
 # 18. Container Network Creation Flow
 
+The Runtime creates the process/network namespace as part of isolation. The Network Manager receives a PID/netns reference and configures connectivity inside that existing namespace.
+
 ```text
-Receive existing container network namespace / PID from Runtime
+Receive existing container netns reference
     ↓
 Allocate container IP
     ↓
@@ -862,7 +866,7 @@ This is better than treating route configuration as a one-time event.
 
 BGP could distribute container CIDRs dynamically.
 
-I am not using it in the first complete version because it introduces:
+It is not used in the first complete version because it introduces:
 
 - BGP sessions
 - route advertisements
@@ -881,7 +885,7 @@ BGP remains a future extension.
 
 VXLAN is also a valid future direction.
 
-I am not using it initially because it adds:
+It is not used initially because it adds:
 
 - encapsulation
 - tunnel endpoints
@@ -1399,7 +1403,7 @@ type RouteManager interface {
 }
 ```
 
-I prefer reconciliation over one-time route mutation because kernel state can drift.
+Reconciliation is preferred over one-time route mutation because kernel state can drift.
 
 ---
 
@@ -1470,7 +1474,7 @@ remove partially created resources
 
 # 60. Failure: Bridge Missing
 
-I prefer Agent startup to ensure `helix0` exists before the node becomes ready.
+Agent startup should ensure `helix0` exists before the node becomes ready.
 
 That keeps per-container setup simpler.
 
@@ -2048,7 +2052,7 @@ encrypted overlays
 
 ---
 
-# 88. What I Am Not Using Initially
+# 88. What Is Not Used Initially
 
 ```text
 Docker networking
@@ -2089,7 +2093,7 @@ Nodes can later advertise their container CIDRs instead of receiving direct rout
 
 ## eBPF Dataplane
 
-I can later explore replacing parts of traditional networking with eBPF.
+A later version can explore replacing parts of traditional networking with eBPF.
 
 ## Network Policies
 
@@ -2302,8 +2306,8 @@ flowchart LR
 ```mermaid
 flowchart TD
     S[Container Scheduled]
+    N[Runtime Creates Container Netns]
     I[Allocate IP]
-    N[Create Network Namespace]
     V[Create Veth Pair]
     B[Attach Host Veth to helix0]
     M[Move Peer Into Namespace]
@@ -2314,9 +2318,9 @@ flowchart TD
     D[Register Service Endpoint]
     RUN[Container Running]
 
-    S --> I
-    I --> N
-    N --> V
+    S --> N
+    N --> I
+    I --> V
     V --> B
     B --> M
     M --> C

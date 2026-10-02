@@ -700,16 +700,20 @@ Container creation needs cooperation between Runtime and Network Manager.
 A useful sequence is:
 
 ```text
-Runtime prepares container
+Runtime creates the child process and namespace isolation, including CLONE_NEWNET
     ↓
-network namespace exists
+network namespace exists and is addressable through the child PID/netns handle
     ↓
-Network Manager configures netns
+child waits at a bootstrap / pre-exec synchronization point
     ↓
-Runtime starts final workload
+Network Manager enters/configures that existing netns
+    ↓
+network setup completes
+    ↓
+Runtime releases the child and continues final workload startup
 ```
 
-The exact synchronization mechanism can evolve, but the workload should not begin normal execution before its required network setup is complete.
+The Runtime owns creation of the process network namespace; the Network Manager owns connectivity inside it. The exact parent/child synchronization mechanism can evolve, but the workload should not begin normal execution before required network setup is complete.
 
 See [`NETWORKING.md`](NETWORKING.md) for the network lifecycle.
 
@@ -1005,7 +1009,8 @@ flowchart TD
     V --> RF[Prepare RootFS]
     RF --> CG[Create cgroup]
     CG --> NS[Create Child + Namespaces]
-    NS --> NW[Coordinate Network Setup]
+    NS --> SYNC[Parent / Child Synchronization]
+    SYNC --> NW[Network Manager Configures Existing Netns]
     NW --> PR[Configure pivot_root + /proc]
     PR --> EX[Exec Workload]
     EX --> RUN[RUNNING]

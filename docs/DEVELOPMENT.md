@@ -24,19 +24,11 @@ Ubuntu Server 22.04+
 
 A useful full cluster:
 
-```mermaid
-flowchart TB
-    CP[Control Plane VM<br/>192.168.50.10]
-
-    subgraph NET[Private Management Network]
-        WA[Worker A<br/>192.168.50.11<br/>10.10.1.0/24]
-        WB[Worker B<br/>192.168.50.12<br/>10.10.2.0/24]
-        WC[Worker C<br/>192.168.50.13<br/>10.10.3.0/24]
-    end
-
-    CP --- WA
-    CP --- WB
-    CP --- WC
+```text
+Control Plane VM
+Worker A VM
+Worker B VM
+Worker C VM
 ```
 
 The Control Plane can also run on one of the worker hosts during early development, but keeping roles separate makes debugging easier.
@@ -321,7 +313,8 @@ Example:
 
 ```bash
 ./bin/helixd \
-  --listen 0.0.0.0:8080 \
+  --rest-listen 0.0.0.0:8080 \
+  --grpc-listen 0.0.0.0:9090 \
   --grpc-agent-timeout 5s
 ```
 
@@ -338,12 +331,16 @@ Example:
 ```bash
 sudo ./bin/helix-agent \
   --control-plane 192.168.50.10:9090 \
+  --rpc-listen 0.0.0.0:9091 \
+  --rpc-advertise 192.168.50.11:9091 \
   --node-id node-a \
   --management-ip 192.168.50.11 \
   --container-cidr 10.10.1.0/24
 ```
 
-The Agent needs elevated privileges for low-level runtime/network operations in the first version.
+`--rpc-listen` is the local bind address for the Agent-hosted `AgentService`; `--rpc-advertise` is the dialable management-network address sent during `RegisterNode`. The example ports are configuration examples, not protocol constants.
+
+The Agent needs elevated privileges for low-level runtime/network operations in the first version. Keep the Agent listener on the trusted private management network.
 
 ---
 

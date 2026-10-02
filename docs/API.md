@@ -8,15 +8,18 @@
 
 Helixctl intentionally uses two API styles.
 
-```mermaid
-flowchart LR
-    CLI[helixctl] -->|REST /v1| CP[Helix Control Plane]
-
-    AG[Helix Node Agent] -->|Register / Heartbeat / Status| CP
-    CP -->|Run / Stop / Inspect / Apply Routes| AG
-
-    AG --> RT[Helix Runtime]
-    AG --> NW[Helix Network Manager]
+```text
+User / helixctl
+      |
+     REST
+      |
+      v
+Helix Control Plane
+      |
+     gRPC
+      |
+      v
+Helix Node Agent
 ```
 
 REST is the user-facing cluster API.
@@ -118,6 +121,8 @@ Example request:
   }
 }
 ```
+
+For v1, endpoint readiness can use the minimum workload-health rule defined by the architecture: the container process must be running. HTTP, TCP, and exec probes remain extensible follow-up health types rather than implicit v1 requirements.
 
 Possible response:
 
@@ -384,9 +389,20 @@ This makes multi-component debugging much easier.
 
 ---
 
-# 18. Internal gRPC Services
+# 18. Internal gRPC Topology
 
-Helix uses two logical gRPC service contracts to manage internal coordination, with distinct server/client roles.
+The v1 internal protocol uses **two server roles** because registration/status flows and execution commands travel in opposite logical directions.
+
+```mermaid
+flowchart LR
+    CLI[helixctl] -->|REST /v1| CP[Helix Control Plane]
+    AG[Helix Node Agent] -->|Register / Heartbeat / Status| CP
+    CP -->|Run / Stop / Inspect / Apply Routes| AG
+    AG --> RT[Helix Runtime]
+    AG --> NW[Helix Network Manager]
+```
+
+Conceptually, `helixd` hosts a Control Plane service for Agent-originated state/reporting calls:
 
 ```proto
 service ControlPlaneService {
@@ -394,7 +410,11 @@ service ControlPlaneService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   rpc ReportStatus(ReportStatusRequest) returns (ReportStatusResponse);
 }
+```
 
+Each `helix-agent` hosts an Agent service for Control-Plane-originated commands:
+
+```proto
 service AgentService {
   rpc RunContainer(RunContainerRequest) returns (RunContainerResponse);
   rpc StopContainer(StopContainerRequest) returns (StopContainerResponse);
@@ -405,15 +425,7 @@ service AgentService {
 }
 ```
 
-### 18.1. ControlPlaneService
-* **Server**: `helixd`
-* **Client**: `helix-agent`
-* **Responsibilities**: Node registration, heartbeats, and status reporting initiated by the worker agent.
-
-### 18.2. AgentService
-* **Server**: `helix-agent`
-* **Client**: `helixd`
-* **Responsibilities**: Lifecycle commands (Run, Stop, Inspect, List) and route updates initiated by the Control Plane.
+During registration, the Agent advertises the management-network address where its Agent service can be reached. The actual `.proto` files remain the source of truth once implementation begins.
 
 ---
 
@@ -425,12 +437,15 @@ Agent -> Control Plane logically contains:
 Node ID
 Hostname
 Management IP
+Agent RPC Address
 Container CIDR
 CPU Capacity
 Memory Capacity
 Agent Version
 Network Readiness
 ```
+
+`Agent RPC Address` is the dialable management-network endpoint for the Agent-hosted `AgentService`. It may differ from the local bind address when the Agent listens on `0.0.0.0`.
 
 The response can return:
 
@@ -458,7 +473,7 @@ Network Ready
 Container Summary
 ```
 
-The first version can use unary heartbeats.
+The first version can use unary heartbeats against the Control Plane service. Container lifecycle changes that occur outside a direct command response can be reported through `ReportStatus` (or an equivalent status-reporting RPC defined by the final proto).
 
 Future version:
 

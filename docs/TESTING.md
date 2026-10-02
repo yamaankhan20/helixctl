@@ -19,26 +19,15 @@ A scheduler can pass every unit test while the real system still fails because:
 
 The test strategy therefore uses multiple layers:
 
-```mermaid
-flowchart TB
-    U[Unit Tests]
-    I[Component / Integration Tests]
-    L[Privileged Linux Runtime Tests]
-    N[Networking Integration Tests]
-    E[End-to-End Cluster Tests]
-    F[Failure Injection]
-    R[Race Detection]
-
-    U --> I
-    I --> L
-    I --> N
-    L --> E
-    N --> E
-    E --> F
-
-    R -. concurrency validation .-> U
-    R -. concurrency validation .-> I
-    R -. concurrency validation .-> E
+```text
+Unit
+Integration
+Linux Runtime Integration
+Networking Integration
+End-to-End
+Failure Injection
+Race Detection
+Smoke Tests
 ```
 
 ---
@@ -132,6 +121,9 @@ Test:
 - health transitions
 - no-eligible-node scheduler result
 - least-load node selection
+- concurrent placement reservations prevent oversubscription
+- reservation rollback after permanent placement failure
+- reservation release after workload deletion/cancellation
 - desired/actual mismatch handling
 - route calculation
 - endpoint health filtering
@@ -195,7 +187,8 @@ Integration tests connect real project components.
 Examples:
 
 ```text
-Control Plane <-> Agent gRPC
+helix-agent -> ControlPlaneService on helixd
+helixd -> AgentService on helix-agent
 Agent <-> Runtime
 Agent <-> Network Manager
 Route Controller <-> Agent
@@ -208,11 +201,19 @@ Mocks should be used only where the boundary under test requires them.
 
 # 11. gRPC Integration Tests
 
-Start an Agent gRPC server and exercise:
+Start both internal gRPC server roles.
+
+Control Plane service:
 
 ```text
 RegisterNode
 Heartbeat
+ReportContainerStatus
+```
+
+Agent service:
+
+```text
 RunContainer
 InspectContainer
 StopContainer
@@ -225,6 +226,11 @@ Verify:
 - status codes
 - conversion between domain/proto
 - idempotent container ID behavior
+- Agent registration advertises a dialable Agent RPC address
+- Agent -> Control Plane heartbeat/status direction
+- Control Plane -> Agent lifecycle/route direction
+- stale route generation rejection
+- calls are sent to the correct server role/direction
 
 ---
 
@@ -265,6 +271,12 @@ Container mount operations do not modify host mount table.
 ### Network
 
 Container has a separate interface/route view.
+
+Also verify Runtime/Network Manager coordination:
+
+- Runtime creates the process Network Namespace before network configuration begins.
+- Network Manager receives the existing PID/netns reference and configures connectivity there.
+- the final workload cannot `exec` before required network setup completes.
 
 ---
 
@@ -587,6 +599,7 @@ All destructive tests should run only in disposable environments.
 The core project is not primarily an HTTP throughput benchmark, but useful load scenarios include:
 
 - many concurrent container create requests
+- concurrent scheduling against resource reservations to detect overcommit
 - heartbeat fan-in
 - concurrent IP allocations
 - repeated DNS queries
