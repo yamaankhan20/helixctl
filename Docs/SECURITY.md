@@ -27,14 +27,29 @@ Do not run untrusted workloads in the first version.
 
 Initial assumptions:
 
-```text
-trusted lab environment
-trusted Control Plane
-trusted worker nodes
-trusted operator
-trusted workload/rootfs
-private management network
+```mermaid
+flowchart TB
+    O[Trusted Operator] --> CP[Helix Control Plane]
+
+    subgraph Trusted[Trusted Private Management Network]
+        CP <-->|gRPC coordination| AG[Rootful Helix Node Agent]
+    end
+
+    AG --> RT[Helix Runtime]
+    AG --> NM[Helix Network Manager]
+
+    RT --> K[Linux Kernel]
+    NM --> K
+
+    W[Trusted Workload / RootFS] --> RT
 ```
+
+Note:
+- this is a trust model, not a production security boundary
+- Agent/Runtime are rootful in v1
+- containers share the host kernel
+- untrusted workloads are unsupported
+- public Agent exposure is unsupported
 
 The project does not initially assume hostile tenants.
 

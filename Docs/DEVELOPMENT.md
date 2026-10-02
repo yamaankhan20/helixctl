@@ -24,11 +24,19 @@ Ubuntu Server 22.04+
 
 A useful full cluster:
 
-```text
-Control Plane VM
-Worker A VM
-Worker B VM
-Worker C VM
+```mermaid
+flowchart TB
+    CP[Control Plane VM<br/>192.168.50.10]
+
+    subgraph NET[Private Management Network]
+        WA[Worker A<br/>192.168.50.11<br/>10.10.1.0/24]
+        WB[Worker B<br/>192.168.50.12<br/>10.10.2.0/24]
+        WC[Worker C<br/>192.168.50.13<br/>10.10.3.0/24]
+    end
+
+    CP --- WA
+    CP --- WB
+    CP --- WC
 ```
 
 The Control Plane can also run on one of the worker hosts during early development, but keeping roles separate makes debugging easier.

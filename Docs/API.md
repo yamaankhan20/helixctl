@@ -8,18 +8,15 @@
 
 Helixctl intentionally uses two API styles.
 
-```text
-User / helixctl
-      |
-     REST
-      |
-      v
-Helix Control Plane
-      |
-     gRPC
-      |
-      v
-Helix Node Agent
+```mermaid
+flowchart LR
+    CLI[helixctl] -->|REST /v1| CP[Helix Control Plane]
+
+    AG[Helix Node Agent] -->|Register / Heartbeat / Status| CP
+    CP -->|Run / Stop / Inspect / Apply Routes| AG
+
+    AG --> RT[Helix Runtime]
+    AG --> NW[Helix Network Manager]
 ```
 
 REST is the user-facing cluster API.

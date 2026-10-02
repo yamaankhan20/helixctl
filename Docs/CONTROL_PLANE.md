@@ -290,22 +290,19 @@ The Control Plane records the latest observation.
 
 A useful node-health model:
 
-```text
-REGISTERING
-HEALTHY
-SUSPECT
-UNREACHABLE
-NOT_READY
-```
+```mermaid
+stateDiagram-v2
+    [*] --> REGISTERING
+    REGISTERING --> HEALTHY: registration + ready
 
-Example transition:
+    HEALTHY --> SUSPECT: missed heartbeat
+    SUSPECT --> HEALTHY: heartbeat restored
+    SUSPECT --> UNREACHABLE: health timeout
 
-```text
-HEALTHY
-  ↓ missed heartbeats
-SUSPECT
-  ↓ timeout exceeded
-UNREACHABLE
+    HEALTHY --> NOT_READY: network/runtime readiness lost
+    NOT_READY --> HEALTHY: readiness restored
+
+    UNREACHABLE --> HEALTHY: node reconnects / registers
 ```
 
 Network readiness can be tracked separately because a node can be alive while container networking is broken.

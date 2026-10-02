@@ -21,14 +21,15 @@ Helixctl is a systems-learning project that bridges the gap between high-level o
 flowchart TB
     U[User] --> CLI[helixctl CLI]
     CLI -- REST --> CP[Helix Control Plane]
-    CP -- gRPC --> NA[Helix Node Agent]
-    subgraph Node
-        NA --> Runtime[Helix Runtime]
+
+    CP <-->|gRPC coordination| NA[Helix Node Agent]
+
+    subgraph Node[Worker Node]
+        NA --> RT[Helix Runtime]
         NA --> NM[Helix Network Manager]
     end
-    subgraph ControlPlaneSubsystem
-        CP --> SD[Helix Service Discovery]
-    end
+
+    CP --> SD[Helix Service Discovery]
 ```
 
 ## Core Components

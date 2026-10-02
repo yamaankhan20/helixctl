@@ -10,27 +10,32 @@ The project should grow vertically.
 
 Each milestone should produce something observable before another major subsystem is stacked on top.
 
-The sequence is:
+```mermaid
+flowchart LR
+    F[Foundation]
+    P[Process Runner]
+    NS[Namespaces]
+    CG[cgroups v2]
+    RF[RootFS / pivot_root]
+    LN[Local Networking]
+    AG[Node Agent]
+    CP[Control Plane]
+    SC[Scheduler]
+    E2E[End-to-End Run]
+    MR[Multi-Node Routing]
+    HM[Health]
+    RC[Reconciliation]
+    RS[Rescheduling]
+    SD[Service Discovery]
+    DNS[Internal DNS]
+    FT[Failure Testing]
+    OBS[Observability / Polish]
 
-```text
-Linux execution
-    ↓
-container isolation
-    ↓
-local networking
-    ↓
-Node Agent
-    ↓
-Control Plane
-    ↓
-multi-node networking
-    ↓
-reconciliation
-    ↓
-service discovery
-    ↓
-failure testing
+    F --> P --> NS --> CG --> RF --> LN --> AG --> CP --> SC --> E2E
+    E2E --> MR --> HM --> RC --> RS --> SD --> DNS --> FT --> OBS
 ```
+
+The sequence is:
 
 ---
 

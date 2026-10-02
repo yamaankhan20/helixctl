@@ -19,15 +19,26 @@ A scheduler can pass every unit test while the real system still fails because:
 
 The test strategy therefore uses multiple layers:
 
-```text
-Unit
-Integration
-Linux Runtime Integration
-Networking Integration
-End-to-End
-Failure Injection
-Race Detection
-Smoke Tests
+```mermaid
+flowchart TB
+    U[Unit Tests]
+    I[Component / Integration Tests]
+    L[Privileged Linux Runtime Tests]
+    N[Networking Integration Tests]
+    E[End-to-End Cluster Tests]
+    F[Failure Injection]
+    R[Race Detection]
+
+    U --> I
+    I --> L
+    I --> N
+    L --> E
+    N --> E
+    E --> F
+
+    R -. concurrency validation .-> U
+    R -. concurrency validation .-> I
+    R -. concurrency validation .-> E
 ```
 
 ---

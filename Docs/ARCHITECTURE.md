@@ -1077,7 +1077,7 @@ Linux bridge
 ```mermaid
 flowchart LR
     C[Container netns<br/>eth0<br/>10.10.1.5] <-->|veth pair| H[Host-side veth]
-    H --> B[Linux Bridge br0]
+    H --> B[Linux Bridge helix0]
     B --> N[Host Network]
 ```
 
