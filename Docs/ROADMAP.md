@@ -62,7 +62,29 @@ go test ./... passes
 
 ---
 
-# 3. Milestone 1 — Local Process Runner
+# 3. Milestone 0A — Architecture Contracts / Boundaries
+
+Finalize core design contracts to prevent major rewrites:
+
+- Workload / Container Instance / Node / Service / Endpoint identity
+- Runtime vs Network Manager boundary
+- Agent ↔ Control Plane transport topology
+- Node registration model
+- Container lifecycle states
+- Node health states
+- Route generation semantics
+- Idempotent request identity
+- v1 health semantics
+
+Success:
+
+```text
+Core gRPC contracts and domain boundaries finalized.
+```
+
+---
+
+# 4. Milestone 1 — Local Process Runner
 
 Build a minimal local Runtime that can execute a process through Go.
 
