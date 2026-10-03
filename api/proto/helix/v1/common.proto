@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package helix.v1;
+
+option go_package = "github.com/yamaankhan20/helixctl/gen/proto/helix/v1;helixv1";
+
+message Resources {
+  int64 cpu_millis = 1;
+  int64 memory_bytes = 2;
+}
+
+enum ContainerState {
+  CONTAINER_STATE_PENDING = 0;
+  CONTAINER_STATE_STARTING = 1;
+  CONTAINER_STATE_RUNNING = 2;
+  CONTAINER_STATE_STOPPED = 3;
+  CONTAINER_STATE_FAILED = 4;
+}
+
+enum NodeHealth {
+  NODE_HEALTH_REGISTERING = 0;
+  NODE_HEALTH_HEALTHY = 1;
+  NODE_HEALTH_SUSPECT = 2;
+  NODE_HEALTH_UNREACHABLE = 3;
+  NODE_HEALTH_NOT_READY = 4;
+}
+
+message Route {
+  string destination_cidr = 1;
+  string next_hop = 2;
+  uint64 generation = 3;
+}

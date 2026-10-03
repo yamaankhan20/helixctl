@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package helix.v1;
+
+import "api/proto/helix/v1/common.proto";
+
+option go_package = "github.com/yamaankhan20/helixctl/gen/proto/helix/v1;helixv1";
+
+service ControlPlaneService {
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ReportStatus(ReportStatusRequest) returns (ReportStatusResponse);
+}
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  string hostname = 2;
+  string management_ip = 3;
+  string agent_rpc_address = 4;
+  string container_cidr = 5;
+  Resources capacity = 6;
+  string agent_version = 7;
+  bool network_ready = 8;
+}
+
+message RegisterNodeResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  int64 timestamp = 2;
+  Resources available_resources = 3;
+  repeated string running_container_ids = 4;
+  bool network_ready = 5;
+}
+
+message HeartbeatResponse {}
+
+message ReportStatusRequest {
+  string node_id = 1;
+  string container_id = 2;
+  string workload_id = 3;
+  uint64 generation = 4;
+  ContainerState state = 5;
+  int32 pid = 6;
+  string ip = 7;
+  string error_message = 8;
+}
+
+message ReportStatusResponse {}
