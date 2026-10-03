@@ -1,1 +1,2 @@
-package heartbeat
+// Package scheduler contains scheduler logic.
+package scheduler

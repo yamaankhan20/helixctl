@@ -1,1 +1,2 @@
-package heartbeat
+// Package netns contains netns logic.
+package netns

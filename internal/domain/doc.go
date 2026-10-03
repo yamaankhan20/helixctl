@@ -1,1 +1,2 @@
-package heartbeat
+// Package domain contains domain logic.
+package domain

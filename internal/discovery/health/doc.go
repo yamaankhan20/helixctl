@@ -1,1 +1,2 @@
-package heartbeat
+// Package health contains health logic.
+package health

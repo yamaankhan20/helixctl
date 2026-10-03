@@ -1,1 +1,2 @@
-package heartbeat
+// Package state contains state logic.
+package state

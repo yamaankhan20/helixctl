@@ -1,1 +1,2 @@
-package heartbeat
+// Package registration contains registration logic.
+package registration

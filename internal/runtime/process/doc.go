@@ -1,1 +1,2 @@
-package heartbeat
+// Package process contains process logic.
+package process

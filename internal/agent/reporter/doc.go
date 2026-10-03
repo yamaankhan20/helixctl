@@ -1,1 +1,2 @@
-package heartbeat
+// Package reporter contains reporter logic.
+package reporter
